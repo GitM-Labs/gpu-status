@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU queue</title>
+<meta name="description" content="Live status of the team's H200 GPU nodes and job queue.">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%271%27 y=%271%27 width=%2714%27 height=%2714%27 rx=%273%27 fill=%27%230f6e74%27/%3E%3Crect x=%274%27 y=%274%27 width=%272%27 height=%278%27 fill=%27white%27/%3E%3Crect x=%277%27 y=%276%27 width=%272%27 height=%276%27 fill=%27white%27/%3E%3Crect x=%2710%27 y=%278%27 width=%272%27 height=%274%27 fill=%27white%27/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Status data comes from the `status` branch of STATUS_REPO, written by
+   `gitm-job _push-status` on the Slurm controller. */
+:root {
+  --paper: #eef1f4;
+  --panel: #f9fafb;
+  --ink: #1c2733;
+  --steel: #5b6b7c;
+  --rule: #cdd5dd;
+  --cell: #e2e7ec;
+  --load: #0f6e74;
+  --load-soft: #cfe5e6;
+  --wait: #a8661a;
+  --wait-soft: #f4e6d2;
+  --bad: #b3261e;
+  --bad-soft: #f6dcda;
+  --good: #2f7a3e;
+  --log-bg: #1f2b38;
+  --log-ink: #d6dee6;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #16202b; --panel: #1d2935; --ink: #e4eaf0; --steel: #93a3b3;
+    --rule: #2f3e4d; --cell: #263443; --load: #3fb3ae; --load-soft: #1f4547;
+    --wait: #e0a050; --wait-soft: #3d3122; --bad: #f08a80; --bad-soft: #43282a;
+    --good: #6cc382; --log-bg: #101820; --log-ink: #c9d3dd; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #16202b; --panel: #1d2935; --ink: #e4eaf0; --steel: #93a3b3;
+  --rule: #2f3e4d; --cell: #263443; --load: #3fb3ae; --load-soft: #1f4547;
+  --wait: #e0a050; --wait-soft: #3d3122; --bad: #f08a80; --bad-soft: #43282a;
+  --good: #6cc382; --log-bg: #101820; --log-ink: #c9d3dd; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 16px/1.5 "Archivo", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 32px 16px 64px; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--load); outline-offset: 2px; border-radius: 2px; }
+
+header.top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; margin-bottom: 28px; }
+h1 { font-size: 2.6rem; line-height: 1; margin: 0; font-weight: 800; font-stretch: 125%; letter-spacing: -0.02em; }
+.sync { color: var(--steel); font-size: .9rem; display: flex; align-items: center; gap: 8px; }
+.sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+.sync.stale .dot { background: var(--wait); }
+.sync.down .dot { background: var(--bad); }
+.banner { border-left: 3px solid var(--wait); background: var(--wait-soft); padding: 10px 14px; margin: -12px 0 24px; font-size: .95rem; }
+.banner.bad { border-color: var(--bad); background: var(--bad-soft); }
+.lock { max-width: 380px; margin: 48px 0 24px; }
+.lock p { color: var(--steel); margin: 0 0 16px; }
+.lock label.field { display: block; font-weight: 600; margin-bottom: 6px; }
+.lock input[type=password] { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--rule);
+  border-radius: 6px; background: var(--panel); color: var(--ink); }
+.lock .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.lock .remember { font-size: .9rem; color: var(--steel); display: flex; gap: 6px; align-items: center; }
+.lock button, .sync button { font: inherit; cursor: pointer; }
+.lock button { background: var(--load); color: var(--panel); border: 0; border-radius: 6px; padding: 9px 18px; font-weight: 600; }
+.lock button[disabled] { opacity: .6; cursor: progress; }
+.lock .err { color: var(--bad); font-size: .9rem; margin: 10px 0 0; min-height: 1.4em; }
+.sync button { background: none; border: 0; color: var(--steel); text-decoration: underline; padding: 0 0 0 6px; font-size: .9rem; }
+
+h2 { font-size: 1.15rem; font-weight: 700; font-stretch: 100%; margin: 44px 0 12px; display: flex; gap: 10px; align-items: baseline; }
+h2 .count { color: var(--steel); font-weight: 500; }
+
+/* --- the trays: one per GPU node --- */
+.trays { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 500px), 1fr)); gap: 20px; }
+.tray { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 18px 18px 14px; min-width: 0; }
+.tray-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.node { font-size: 1.5rem; font-weight: 750; font-stretch: 112%; margin: 0; letter-spacing: -0.01em; }
+.node-state { font-size: .85rem; color: var(--steel); white-space: nowrap; }
+.node-state.bad { color: var(--bad); font-weight: 600; }
+.occupant { margin: 10px 0 14px; min-height: 3.2em; }
+.occupant .who { font-size: 1.05rem; font-weight: 650; overflow-wrap: anywhere; }
+.occupant .meta .owner { color: var(--load); font-weight: 600; }
+.occupant .meta { color: var(--steel); font-size: .88rem; overflow-wrap: anywhere; }
+.occupant.idle .who { color: var(--steel); font-weight: 500; }
+.occupant .detail { color: var(--wait); font-size: .88rem; }
+
+.runbar { height: 4px; background: var(--cell); border-radius: 2px; margin: 8px 0 2px; overflow: hidden; }
+.runbar > i { display: block; height: 100%; background: var(--load); }
+.runbar.late > i { background: var(--wait); }
+
+.gpus { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.gpu { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; }
+.cell { position: relative; height: 92px; background: var(--cell); border-radius: 4px; overflow: hidden; }
+.cell .fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--load); transition: height .8s cubic-bezier(.2,.7,.2,1); }
+.memb { height: 4px; background: var(--cell); border-radius: 2px; overflow: hidden; }
+.memb > i { display: block; height: 100%; background: var(--wait); }
+.cell .pct { position: absolute; left: 0; right: 0; top: 6px; text-align: center; font-size: .78rem; font-weight: 650; color: var(--ink); }
+.cell.hot .pct { color: var(--panel); }
+.gpu .lbl { font-size: .72rem; color: var(--steel); text-align: center; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.legend { font-size: .78rem; color: var(--steel); margin-top: 8px; }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; vertical-align: -1px; margin: 0 4px 0 0; }
+.nogpu { color: var(--steel); font-size: .88rem; padding: 18px 0; }
+
+details.log { margin-top: 12px; }
+details.log summary { cursor: pointer; font-size: .88rem; color: var(--steel); }
+details.log summary:hover { color: var(--ink); }
+pre { margin: 8px 0 0; background: var(--log-bg); color: var(--log-ink); border-radius: 6px; padding: 10px 12px;
+      font: 400 .76rem/1.5 "IBM Plex Mono", ui-monospace, monospace; overflow-x: auto; white-space: pre; max-height: 320px; overflow-y: auto; }
+
+/* --- queue: a real order, so positions are numbered --- */
+ol.queue { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.queue li { display: grid; grid-template-columns: 3rem minmax(0, 1fr) auto; gap: 4px 16px; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.queue .pos { font-size: 1.6rem; font-weight: 800; font-stretch: 125%; color: var(--wait); line-height: 1; }
+.queue .what { font-weight: 600; overflow-wrap: anywhere; }
+.queue .meta .owner { color: var(--wait); font-weight: 600; }
+.queue .meta { color: var(--steel); font-size: .88rem; grid-column: 2; overflow-wrap: anywhere; }
+.queue .wait { color: var(--steel); font-size: .9rem; white-space: nowrap; grid-row: 1; grid-column: 3; }
+.empty { color: var(--steel); padding: 14px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+
+/* --- recent --- */
+.recent { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.recent th { text-align: left; font-weight: 600; color: var(--steel); font-size: .82rem; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule); }
+.recent td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.recent td.name { overflow-wrap: anywhere; }
+.st { font-weight: 600; white-space: nowrap; }
+.st.succeeded { color: var(--good); }
+.st.failed { color: var(--bad); }
+.st.cancelled { color: var(--steel); }
+.recent .why { color: var(--steel); font-size: .85rem; }
+.recent tr.expand td { padding-top: 0; }
+.res { display: grid; gap: 14px; padding: 4px 0 14px; }
+.res .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px 18px; }
+.res .m b { display: block; font-size: 1.15rem; font-weight: 700; font-stretch: 110%; }
+.res .m span { color: var(--steel); font-size: .8rem; }
+.res h4 { margin: 0 0 6px; font-size: .85rem; font-weight: 600; color: var(--steel); }
+.res .kbar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; background: var(--cell); }
+.res .kbar i { display: block; height: 100%; }
+.res .klegend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .8rem; color: var(--steel); margin-top: 6px; }
+.res .klegend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.res .files { font-size: .8rem; color: var(--steel); }
+.res .files code { font-family: "IBM Plex Mono", ui-monospace, monospace; color: var(--ink); }
+.res .warn { font-size: .85rem; color: var(--wait); border-left: 3px solid var(--wait); padding-left: 10px; }
+.recent button.more { font: inherit; font-size: .82rem; color: var(--steel); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+@media (max-width: 640px) {
+  h1 { font-size: 2.1rem; }
+  .cell { height: 72px; }
+  .recent .c-model, .recent .c-node { display: none; }
+}
+
+.howto { margin-top: 48px; color: var(--steel); font-size: .92rem; max-width: 72ch; }
+.howto code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .85em; background: var(--cell); padding: 1px 5px; border-radius: 3px; color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) { .cell .fill { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>GPU queue</h1>
+    <div class="sync" id="sync" role="status" aria-live="polite"><span class="dot"></span><span id="sync-text">Loading…</span></div>
+  </header>
+  <div id="banner"></div>
+
+  <form class="lock" id="lock" hidden>
+    <p>This page is for the team. Enter the password to see the queue.</p>
+    <label class="field" for="pw">Password</label>
+    <input type="password" id="pw" autocomplete="current-password" required>
+    <div class="row">
+      <label class="remember"><input type="checkbox" id="remember" checked> Remember on this device</label>
+      <button type="submit" id="unlock">Unlock</button>
+    </div>
+    <p class="err" id="pw-err" role="alert"></p>
+  </form>
+
+  <div id="content">
+  <section aria-labelledby="h-nodes">
+    <h2 id="h-nodes" class="visually-hidden" style="margin-top:0">Nodes</h2>
+    <div class="trays" id="trays"></div>
+  </section>
+
+  <section aria-labelledby="h-queue">
+    <h2 id="h-queue">Waiting <span class="count" id="queue-count"></span></h2>
+    <div id="queue"></div>
+  </section>
+
+  <section aria-labelledby="h-recent">
+    <h2 id="h-recent">Finished recently</h2>
+    <div id="recent"></div>
+  </section>
+
+  <p class="howto">
+    Each job gets all 8 GPUs of one node, runs in its own container, and starts on whichever node frees up first.
+    To queue one from a cluster node, run <code>gitm-job submit --name my-run --model org/model</code>
+    and check your place with <code>gitm-job ls</code>.
+    Without a shell on the cluster, submit through the Slurm REST API with your Slurm token.
+  </p>
+  </div>
+</div>
+
+<script>
+"use strict";
+const STATUS_REPO = "GitM-Labs/gpu-status";   // written by gitm-job _push-status
+const BRANCH = "status";
+const POLL_MS = 60_000;          // GitHub allows 60 unauthenticated API calls/hour; unchanged polls are free
+const STALE_AFTER_S = 10 * 60;   // the pusher heartbeats every 5 min
+
+const params = new URLSearchParams(location.search);
+const $ = (id) => document.getElementById(id);
+let data = null, raw = null, lastSha = null, source = "", fetchError = null;
+let locked = false, lockMsg = "", typedAttempt = false;
+const openLogs = new Set(), openRows = new Set();
+
+// ---------- fetching ----------
+async function fetchStatus() {
+  if (params.has("src")) {               // local testing: ?src=status.json
+    return { json: await (await fetch(params.get("src"), { cache: "no-store" })).json(), via: "file" };
+  }
+  try {
+    // Ref lookup through the API: cache "no-cache" makes the browser send
+    // If-None-Match, and GitHub does not count 304 replies against the limit.
+    const r = await fetch(`https://api.github.com/repos/${STATUS_REPO}/git/ref/heads/${BRANCH}`,
+                          { cache: "no-cache", headers: { Accept: "application/vnd.github+json" } });
+    if (r.ok) {
+      const sha = (await r.json()).object.sha;
+      if (sha === lastSha && raw) return { json: raw, via: "live" };
+      // By commit sha the file is immutable, so the CDN can't serve a stale copy.
+      const f = await fetch(`https://raw.githubusercontent.com/${STATUS_REPO}/${sha}/status.json`);
+      if (!f.ok) throw new Error(`status.json: HTTP ${f.status}`);
+      lastSha = sha;
+      return { json: await f.json(), via: "live" };
+    }
+    if (r.status === 404) throw new Error("not-found");
+    // 403/429 = this network used up its hourly API calls; fall through.
+  } catch (e) {
+    if (e.message === "not-found") throw e;
+  }
+  // Fallback: branch URL on the raw CDN, which can lag up to ~5 minutes.
+  const f = await fetch(`https://raw.githubusercontent.com/${STATUS_REPO}/${BRANCH}/status.json`);
+  if (f.status === 404) throw new Error("not-found");
+  if (!f.ok) throw new Error(`HTTP ${f.status}`);
+  return { json: await f.json(), via: "cdn" };
+}
+
+// ---------- the password ----------
+// status.json is encrypted on the cluster (AES-256-GCM, key = PBKDF2-SHA256 of
+// the team password). The password never leaves this browser.
+const PW_KEY = "gpu-page-password";
+const store = {
+  get() { for (const st of [sessionStorage, localStorage]) { try { const v = st.getItem(PW_KEY); if (v) return v; } catch (e) {} } return null; },
+  set(pw, remember) { this.clear(); try { (remember ? localStorage : sessionStorage).setItem(PW_KEY, pw); } catch (e) {} },
+  clear() { for (const st of [sessionStorage, localStorage]) { try { st.removeItem(PW_KEY); } catch (e) {} } },
+};
+let password = store.get();
+const keyCache = new Map();
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+async function keyFor(pw, saltB64, iter) {
+  const id = `${saltB64}:${iter}:${pw}`;
+  if (!keyCache.has(id)) {
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+    keyCache.clear();
+    keyCache.set(id, await crypto.subtle.deriveKey(
+      { name: "PBKDF2", hash: "SHA-256", salt: b64(saltB64), iterations: iter },
+      base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]));
+  }
+  return keyCache.get(id);
+}
+
+async function decryptStatus(sealed, pw) {
+  const key = await keyFor(pw, sealed.salt, sealed.iter);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(sealed.iv) }, key, b64(sealed.data));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+async function refresh() {
+  try {
+    const { json, via } = await fetchStatus();
+    raw = json; source = via; fetchError = null;
+  } catch (e) {
+    fetchError = e.message === "not-found"
+      ? "No status published yet. The status pusher on gitmachine-2 hasn't pushed to GitHub."
+      : "Couldn't reach GitHub to load the status. Retrying every minute.";
+  }
+  await unseal();
+  render();
+}
+
+async function unseal() {
+  if (!raw) return;
+  if (!raw.sealed) {
+    // Anything without the expected shape is treated as "no data", never rendered.
+    data = Array.isArray(raw.nodes) && raw.updated ? raw : null; locked = false;
+    if (!data) fetchError = "The status file isn't in a format this page understands. Reload the page (it may be an old copy).";
+    return;
+  }
+  if (!password) { locked = true; data = null; return; }
+  try {
+    data = await decryptStatus(raw, password);
+    if (!Array.isArray(data.nodes) || !data.updated) throw new Error("bad shape");
+    locked = false; lockMsg = "";
+  } catch (e) {
+    // GCM authentication failed: wrong or outdated password.
+    data = null; locked = true; password = null; store.clear();
+    lockMsg = typedAttempt ? "That password didn't work." : "The password was changed. Enter the new one.";
+  }
+}
+
+$("lock").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const btn = $("unlock"), pw = $("pw").value;
+  if (!pw) return;
+  btn.disabled = true; btn.textContent = "Unlocking…"; $("pw-err").textContent = "";
+  password = pw; typedAttempt = true;
+  await unseal();
+  typedAttempt = false;
+  btn.disabled = false; btn.textContent = "Unlock";
+  if (!locked) { store.set(pw, $("remember").checked); $("pw").value = ""; }
+  render();
+  if (locked) $("pw").focus();
+});
+
+function lockPage() { password = null; data = null; store.clear(); locked = true; lockMsg = ""; render(); }
+
+// ---------- formatting ----------
+const ts = (s) => (s ? Date.parse(s) : null);
+function dur(sec) {
+  if (sec == null || !isFinite(sec)) return "–";
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  if (h < 1) return `${m}m`;
+  if (d < 1) return `${h}h ${String(m % 60).padStart(2, "0")}m`;
+  return `${d}d ${h % 24}h`;
+}
+const ago = (s) => dur((Date.now() - ts(s)) / 1000);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const gib = (mib) => (mib == null ? "–" : `${Math.round(mib / 1024)}`);
+
+// ---------- rendering ----------
+function render() {
+  const showLock = locked && !!raw;
+  $("lock").hidden = !showLock;
+  $("content").hidden = showLock;
+  if (showLock) { $("pw-err").textContent = lockMsg; if (document.activeElement === document.body) $("pw").focus(); }
+  renderSync();
+  if (showLock) return;
+  if (!data) {
+    $("trays").innerHTML = `<p class="nogpu">${esc(fetchError || "Loading…")}</p>`;
+    return;
+  }
+  const jobs = new Map(data.running.map((j) => [j.name, j]));
+  $("trays").innerHTML = data.nodes.length
+    ? data.nodes.map((n) => tray(n, jobs.get(n.job))).join("")
+    : `<p class="nogpu">No GPU nodes in the Slurm partition yet.</p>`;
+  // keep open logs open across refreshes
+  document.querySelectorAll("details.log").forEach((d) => {
+    if (openLogs.has(d.dataset.job)) d.open = true;
+    d.addEventListener("toggle", () => (d.open ? openLogs.add(d.dataset.job) : openLogs.delete(d.dataset.job)));
+  });
+
+  const q = data.queued;
+  $("queue-count").textContent = q.length ? `${q.length} job${q.length > 1 ? "s" : ""}` : "";
+  $("queue").innerHTML = q.length
+    ? `<ol class="queue">${q.map(queueRow).join("")}</ol>`
+    : `<p class="empty">Nobody is waiting.${freeNodes() ? " A node is free: a new job starts right away." : ""}</p>`;
+
+  $("recent").innerHTML = data.recent.length
+    ? `<table class="recent"><thead><tr><th>Job</th><th>Result</th><th class="c-model">Model</th><th class="c-node">Node</th><th>Ran</th><th>Ended</th></tr></thead>
+       <tbody>${data.recent.map(recentRow).join("")}</tbody></table>`
+    : `<p class="empty">No finished jobs in the last 7 days.</p>`;
+  document.querySelectorAll("button.more").forEach((b) =>
+    b.addEventListener("click", () => {
+      const row = document.getElementById(b.getAttribute("aria-controls"));
+      const open = row.hidden; row.hidden = !open; b.setAttribute("aria-expanded", String(open));
+      b.textContent = `${open ? "Hide" : "Show"} ${b.dataset.what}`;
+      open ? openRows.add(row.dataset.job) : openRows.delete(row.dataset.job);
+    }));
+  document.querySelectorAll("tr.expand:not([hidden])").forEach((row) => {
+    const b = document.querySelector(`button.more[aria-controls="${row.id}"]`);
+    if (b) { b.setAttribute("aria-expanded", "true"); b.textContent = `Hide ${b.dataset.what}`; }
+  });
+}
+
+function freeNodes() {
+  return data.nodes.filter((n) => n.ready && !n.job).length;
+}
+
+function tray(n, job) {
+  let state = n.ready ? (n.schedulable ? (job ? "In use" : "Free") : "Draining") : "Offline";
+  const bad = !n.ready;
+  let occ;
+  if (job) {
+    const started = ts(job.started), max = job.max_runtime_s;
+    const elapsed = started ? (Date.now() - started) / 1000 : null;
+    const frac = elapsed && max ? Math.min(1, elapsed / max) : 0;
+    occ = `<div class="occupant">
+      <div class="who">${esc(job.display_name)}</div>
+      <div class="meta"><span class="owner">${esc(job.owner)}</span>&ensp;${esc(job.model || job.image)}</div>
+      ${job.state === "starting"
+        ? `<div class="detail">Starting: ${esc(job.detail || "creating container")}</div>`
+        : `<div class="runbar${frac > 0.85 ? " late" : ""}" aria-hidden="true"><i style="width:${(frac * 100).toFixed(1)}%"></i></div>
+           <div class="meta"><span data-elapsed="${esc(job.started)}">${dur(elapsed)}</span> of ${dur(max)} limit</div>`}
+    </div>`;
+  } else {
+    occ = `<div class="occupant idle"><div class="who">${n.ready ? "No job running" : "Node is down or not responding to Slurm"}</div></div>`;
+  }
+  const gpus = n.gpus && n.gpus.length
+    ? `<div class="gpus" role="list" aria-label="GPU utilization">${n.gpus.map(gpuCell).join("")}</div>
+       <div class="legend"><i style="background:var(--load)"></i>compute use&emsp;<i style="background:var(--wait)"></i>memory in use (GiB below)</div>`
+    : `<p class="nogpu">GPU readings unavailable.</p>`;
+  const log = job && job.log_tail && job.log_tail.length
+    ? `<details class="log" data-job="${esc(job.name)}"><summary>Latest output</summary><pre>${esc(job.log_tail.join("\n"))}</pre></details>`
+    : "";
+  return `<article class="tray" aria-label="${esc(n.name)}">
+    <div class="tray-head"><h3 class="node">${esc(n.name)}</h3><span class="node-state${bad ? " bad" : ""}">${state}</span></div>
+    ${occ}${gpus}${log}</article>`;
+}
+
+function gpuCell(g) {
+  const u = g.util ?? 0;
+  const mem = g.mem_total_mib ? (g.mem_used_mib / g.mem_total_mib) * 100 : 0;
+  return `<div class="gpu" role="listitem" aria-label="GPU ${g.index}: ${Math.round(u)}% busy, ${gib(g.mem_used_mib)} of ${gib(g.mem_total_mib)} GiB">
+    <div class="cell${u >= 70 ? " hot" : ""}">
+      <div class="fill" style="height:${u}%"></div>
+      <div class="pct">${Math.round(u)}%</div>
+    </div>
+    <div class="memb" aria-hidden="true"><i style="width:${mem.toFixed(1)}%"></i></div>
+    <div class="lbl" title="${g.power_w ?? "–"} W, ${g.temp_c ?? "–"} °C">${gib(g.mem_used_mib)}G</div>
+  </div>`;
+}
+
+function queueRow(j) {
+  return `<li>
+    <span class="pos" aria-label="Position ${j.position}">${j.position}</span>
+    <span class="what">${esc(j.display_name)}</span>
+    <span class="wait">waiting <span data-since="${esc(j.submitted)}">${ago(j.submitted)}</span></span>
+    <span class="meta"><span class="owner">${esc(j.owner)}</span>&ensp;${esc(j.model)}</span>
+  </li>`;
+}
+
+const KCOL = { gemm: "var(--load)", attention: "#4a7fb5", comm: "var(--wait)", moe: "#7a5ea8",
+               elementwise: "#6b8f3a", norm: "#b05c7a", memory: "#8a7a5c", other: "var(--steel)" };
+const ms = (s) => (s == null ? "–" : s < 1 ? `${(s * 1000).toFixed(s < 0.01 ? 1 : 0)} ms` : `${s.toFixed(2)} s`);
+const pct = (x) => (x == null ? "–" : `${Math.round(x * 100)}%`);
+const bytes = (n) => (n > 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n > 1e3 ? `${Math.round(n / 1e3)} kB` : `${n} B`);
+
+function resultBlock(r) {
+  if (!r) return "";
+  const parts = [];
+  const sv = r.serving;
+  if (sv) {
+    const m = (v, l) => `<div class="m"><b>${v}</b><span>${l}</span></div>`;
+    parts.push(`<div class="metrics">
+      ${m(`${sv.n_requests ?? "–"}${sv.n_failed_requests ? ` <span style="color:var(--bad)">(${sv.n_failed_requests} failed)</span>` : ""}`, "requests in window")}
+      ${m(ms(sv.ttft_p50_s), "time to first token, p50")}
+      ${m(ms(sv.ttft_p95_s), "time to first token, p95")}
+      ${m(ms(sv.tpot_p50_s), "time per output token, p50")}
+      ${m(sv.goodput_rps == null ? "–" : `${sv.goodput_rps.toFixed(1)}/s`, "goodput (requests meeting SLO)")}
+      ${r.kernels ? m(pct(r.kernels.gpu_active_share), "GPU busy during window") : ""}
+    </div>`);
+  }
+  const k = r.kernels;
+  if (k && k.buckets && k.buckets.length) {
+    const col = (b) => KCOL[b] || "var(--steel)";
+    parts.push(`<div><h4>Where GPU kernel time went (${(k.n_kernels ?? 0).toLocaleString()} kernels, ${k.n_devices ?? "?"} GPUs)</h4>
+      <div class="kbar" role="img" aria-label="${esc(k.buckets.map(([b, x]) => `${b} ${pct(x)}`).join(", "))}">
+        ${k.buckets.map(([b, x]) => `<i style="width:${(x * 100).toFixed(2)}%;background:${col(b)}" title="${esc(b)} ${pct(x)}"></i>`).join("")}
+      </div>
+      <div class="klegend">${k.buckets.map(([b, x]) => `<span><i style="background:${col(b)}"></i>${esc(b)} ${pct(x)}</span>`).join("")}</div></div>`);
+  }
+  (r.warnings || []).forEach((w) => parts.push(`<div class="warn">${esc(w)}</div>`));
+  if (r.files && r.files.length) {
+    parts.push(`<div class="files">Files: ${r.files.map(([n, b]) => `<code>${esc(n)}</code> ${bytes(b)}`).join(", ")}</div>`);
+  }
+  return parts.length ? `<div class="res">${parts.join("")}</div>` : "";
+}
+
+function recentRow(j, i) {
+  const ran = ts(j.started) && ts(j.finished) ? (ts(j.finished) - ts(j.started)) / 1000 : null;
+  const label = { succeeded: "Done", cancelled: "Cancelled" }[j.state] || "Failed";
+  const id = `out-${i}`;
+  const res = resultBlock(j.result);
+  const log = j.log_tail && j.log_tail.length ? `<pre>${esc(j.log_tail.join("\n"))}</pre>` : "";
+  const what = res && log ? "results and output" : res ? "results" : "output";
+  const more = res || log
+    ? `<div><button class="more" data-what="${what}" aria-expanded="false" aria-controls="${id}">Show ${what}</button></div>` : "";
+  return `<tr>
+      <td class="name">${esc(j.display_name)}<div class="why">${esc(j.owner)}</div></td>
+      <td><span class="st ${j.state}">${label}</span>${j.detail ? `<div class="why">${esc(j.detail)}</div>` : ""}${more}</td>
+      <td class="c-model">${esc(j.model)}</td>
+      <td class="c-node">${esc(j.node || "–")}</td>
+      <td>${dur(ran)}</td>
+      <td>${ago(j.finished)} ago</td>
+    </tr>${more ? `<tr class="expand" id="${id}" ${openRows.has(j.name) ? "" : "hidden"} data-job="${esc(j.name)}"><td colspan="6">${res}${log}</td></tr>` : ""}`;
+}
+
+function renderSync() {
+  const el = $("sync"), txt = $("sync-text"), banner = $("banner");
+  el.className = "sync"; banner.innerHTML = "";
+  if (locked && raw) { txt.textContent = "Locked"; $("lock-btn")?.remove(); return; }
+  if (!data) {
+    if (fetchError) { el.classList.add("down"); txt.textContent = "No data"; }
+    return;
+  }
+  const age = (Date.now() - ts(data.updated)) / 1000;
+  txt.textContent = `Updated ${dur(age)} ago${source === "cdn" ? " (delayed copy)" : ""}`;
+  if (raw && raw.sealed && !$("lock-btn")) {
+    const b = document.createElement("button"); b.id = "lock-btn"; b.type = "button"; b.textContent = "Lock";
+    b.addEventListener("click", lockPage); el.append(b);
+  }
+  if (age > STALE_AFTER_S) {
+    el.classList.add("down");
+    banner.innerHTML = `<div class="banner bad">The cluster hasn't reported since ${esc(new Date(ts(data.updated)).toLocaleString())}. What you see may be out of date: check <code>systemctl status gitm-status</code> on gitmachine-2.</div>`;
+  } else if (source === "cdn" || fetchError) {
+    el.classList.add("stale");
+    if (source === "cdn") banner.innerHTML = `<div class="banner">Your network has used up GitHub's hourly allowance, so this page is reading a copy that can lag by a few minutes. It switches back on its own.</div>`;
+  }
+}
+
+// tick the clocks every second without refetching
+setInterval(() => {
+  if (!data) return;
+  document.querySelectorAll("[data-elapsed]").forEach((e) => (e.textContent = ago(e.dataset.elapsed)));
+  document.querySelectorAll("[data-since]").forEach((e) => (e.textContent = ago(e.dataset.since)));
+  renderSync();
+}, 1000);
+
+// poll while visible; refresh immediately when the tab comes back
+let timer = null;
+function schedule() { clearInterval(timer); timer = setInterval(() => !document.hidden && refresh(), POLL_MS); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(); schedule(); } });
+refresh(); schedule();
+</script>
+<style>.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}</style>
+</body>
+</html>
