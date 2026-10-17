@@ -137,6 +137,7 @@ ol.queue { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--
 .st.failed { color: var(--bad); }
 .st.cancelled { color: var(--steel); }
 .recent .why { color: var(--steel); font-size: .85rem; }
+.jid { color: var(--steel); font-weight: 500; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .85em; white-space: nowrap; }
 .recent tr.expand td { padding-top: 0; }
 .res { display: grid; gap: 14px; padding: 4px 0 14px; }
 .res .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px 18px; }
@@ -391,6 +392,9 @@ function render() {
   });
 }
 
+// Slurm job ID, shown next to the job's name ("kimi26-smoke #44").
+const jid = (j) => (j && j.name != null && j.name !== "" ? ` <span class="jid">#${esc(String(j.name))}</span>` : "");
+
 function freeNodes() {
   return data.nodes.filter((n) => n.ready && !n.job).length;
 }
@@ -404,7 +408,7 @@ function tray(n, job) {
     const elapsed = started ? (Date.now() - started) / 1000 : null;
     const frac = elapsed && max ? Math.min(1, elapsed / max) : 0;
     occ = `<div class="occupant">
-      <div class="who">${esc(job.display_name)}</div>
+      <div class="who">${esc(job.display_name)}${jid(job)}</div>
       <div class="meta"><span class="owner">${esc(job.owner)}</span>&ensp;${esc(job.model || job.image)}</div>
       ${job.state === "starting"
         ? `<div class="detail">Starting: ${esc(job.detail || "creating container")}</div>`
@@ -442,7 +446,7 @@ function gpuCell(g) {
 function queueRow(j) {
   return `<li>
     <span class="pos" aria-label="Position ${j.position}">${j.position}</span>
-    <span class="what">${esc(j.display_name)}</span>
+    <span class="what">${esc(j.display_name)}${jid(j)}</span>
     <span class="wait">waiting <span data-since="${esc(j.submitted)}">${ago(j.submitted)}</span></span>
     <span class="meta"><span class="owner">${esc(j.owner)}</span>&ensp;${esc(j.model)}</span>
   </li>`;
@@ -495,7 +499,7 @@ function recentRow(j, i) {
   const more = res || log
     ? `<div><button class="more" data-what="${what}" aria-expanded="false" aria-controls="${id}">Show ${what}</button></div>` : "";
   return `<tr>
-      <td class="name">${esc(j.display_name)}<div class="why">${esc(j.owner)}</div></td>
+      <td class="name">${esc(j.display_name)}${jid(j)}<div class="why">${esc(j.owner)}</div></td>
       <td><span class="st ${j.state}">${label}</span>${j.detail ? `<div class="why">${esc(j.detail)}</div>` : ""}${more}</td>
       <td class="c-model">${esc(j.model)}</td>
       <td class="c-node">${esc(j.node || "–")}</td>
